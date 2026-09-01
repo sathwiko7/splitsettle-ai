@@ -1,0 +1,2347 @@
+{% extends "base.html" %}
+{% block title %}{{ group.name }} — SplitSettle AI{% endblock %}
+
+{% block content %}
+
+<div class="breadcrumbs">
+  <a href="/">← All groups</a>
+  <span>/</span>
+  <b>{{ group.name }}</b>
+</div>
+
+<section class="group-head">
+  <div>
+    <div class="kicker">GROUP WORKSPACE</div>
+    <h1>{{ group.name }}</h1>
+    <p>Shared ledger, optimized settlement, and automated recovery in one place.</p>
+  </div>
+
+  <div class="mode-chip">
+    <i></i>
+    {% if razorpay_live %}
+      Razorpay test mode
+    {% else %}
+      Demo / mock mode
+    {% endif %}
+  </div>
+</section>
+
+
+{% set total=namespace(v=0) %}
+{% for e in expenses %}
+  {% set total.v=total.v+e.amount %}
+{% endfor %}
+
+{% set unpaid=settlements|selectattr("status","ne","paid")|list|length %}
+{% set recovery_ready=settlements|selectattr("status","ne","paid")|selectattr("reminder_count","ge",3)|list|length %}
+
+
+<section class="stats-grid">
+  <div class="stat">
+    <span>Total expenses</span>
+    <strong>₹{{ "%.2f"|format(total.v) }}</strong>
+    <small>{{ expenses|length }} recorded</small>
+  </div>
+
+  <div class="stat">
+    <span>Payments due</span>
+    <strong>{{ unpaid }}</strong>
+    <small>of {{ settlements|length }} transfers</small>
+  </div>
+
+  <div class="stat">
+    <span>Recovery rate</span>
+    <strong>{{ recovery_rate }}%</strong>
+    <small>settlements paid</small>
+  </div>
+
+  <div class="stat accent">
+    <span>Transfer efficiency</span>
+    <strong>{{ efficiency }}%</strong>
+    <small>{{ total_settlements }} vs {{ naive_count }} naive</small>
+  </div>
+</section>
+
+
+<div class="workspace-grid">
+
+<section class="panel">
+
+  <div class="panel-head">
+    <div>
+      <div class="kicker">PEOPLE</div>
+      <h2>Members</h2>
+    </div>
+
+    <span class="count">{{ members|length }}</span>
+  </div>
+
+  <div class="member-list">
+
+    {% for m in members %}
+
+      <div class="member">
+        <span class="avatar">{{ m.name[:1]|upper }}</span>
+
+        <div>
+          <strong>{{ m.name }}</strong>
+
+          {% if m.phone %}
+            <small>{{ m.phone }}</small>
+          {% endif %}
+        </div>
+      </div>
+
+    {% else %}
+
+      <div class="empty-inline">
+        No members yet.
+      </div>
+
+    {% endfor %}
+
+  </div>
+
+
+  <form
+    method="post"
+    action="/groups/{{ group.id }}/members"
+    class="compact-form"
+  >
+
+    <input
+      name="name"
+      placeholder="Member name"
+      required
+    >
+
+    <input
+      name="phone"
+      placeholder="Phone (optional)"
+    >
+
+    <button class="secondary">
+      Add member
+    </button>
+
+  </form>
+
+</section>
+
+
+<section class="panel" id="expense-card">
+
+  <div class="panel-head">
+
+    <div>
+      <div class="kicker">LEDGER</div>
+      <h2>Add expense</h2>
+    </div>
+
+    <span class="ai-badge">
+      ✦ AI receipt
+    </span>
+
+  </div>
+
+
+  {% if members %}
+
+  <form
+    method="post"
+    action="/groups/{{ group.id }}/expenses"
+    id="expense-form"
+    class="expense-form"
+  >
+
+    <div class="two-col">
+
+      <label>
+        Description
+
+        <input
+          name="description"
+          id="expense-description"
+          placeholder="Dinner, hotel, cab…"
+          required
+        >
+
+      </label>
+
+
+      <label>
+        Amount
+
+        <input
+          name="amount"
+          id="expense-amount"
+          type="number"
+          step="0.01"
+          min="0.01"
+          placeholder="₹ 0.00"
+          required
+        >
+
+      </label>
+
+    </div>
+
+
+    <label>
+      Paid by
+
+      <select
+        name="paid_by"
+        id="expense-paid-by"
+        required
+      >
+
+        {% for m in members %}
+          <option value="{{ m.id }}">
+            {{ m.name }}
+          </option>
+        {% endfor %}
+
+      </select>
+
+    </label>
+
+
+    <div class="split-head">
+
+      <span>Split between</span>
+
+      <button
+        type="button"
+        class="text-btn"
+        onclick="toggleSplits()"
+      >
+        Toggle all
+      </button>
+
+    </div>
+
+
+    <div class="member-checks">
+
+      {% for m in members %}
+
+        <label class="check-card">
+
+          <input
+            type="checkbox"
+            name="split_between"
+            value="{{ m.id }}"
+            checked
+          >
+
+          <span>{{ m.name }}</span>
+
+        </label>
+
+      {% endfor %}
+
+    </div>
+
+
+    <button class="primary wide">
+      Add expense
+    </button>
+
+  </form>
+
+
+  <details class="receipt-box">
+
+    <summary>
+      ✦ Paste a receipt and let AI extract it
+    </summary>
+
+    <div class="receipt-content">
+
+      <p>
+        Paste OCR/raw receipt text, parse it, select an item,
+        then add it directly to the ledger.
+      </p>
+
+      <textarea
+        id="receipt-text"
+        rows="5"
+        maxlength="12000"
+        placeholder="Pizza Margherita ₹450&#10;Cold Drinks ₹180&#10;French Fries ₹220&#10;Total ₹850"
+      ></textarea>
+
+
+      <button
+        type="button"
+        class="secondary"
+        id="parse-receipt-button"
+        onclick="parseReceipt()"
+      >
+        Parse with AI
+      </button>
+
+
+      <div id="receipt-result"></div>
+
+
+      <div
+        id="receipt-selected"
+        class="selected-ai"
+        hidden
+      >
+
+        <div>
+
+          <small>SELECTED AI ITEM</small>
+
+          <strong id="receipt-selected-text"></strong>
+
+        </div>
+
+        <button
+          type="button"
+          class="primary"
+          id="add-ai-expense-button"
+          onclick="addAIExpense()"
+        >
+          Add to ledger
+        </button>
+
+      </div>
+
+
+      <div id="receipt-message"></div>
+
+    </div>
+
+  </details>
+
+
+  {% else %}
+
+    <div class="empty-inline">
+      Add at least one member before recording an expense.
+    </div>
+
+  {% endif %}
+
+</section>
+
+</div>
+
+
+<section class="panel table-panel">
+
+  <div class="panel-head">
+
+    <div>
+
+      <div class="kicker">ACTIVITY</div>
+
+      <h2>Expense ledger</h2>
+
+      <p>
+        {{ expenses|length }}
+        expense{% if expenses|length != 1 %}s{% endif %}
+        recorded
+      </p>
+
+    </div>
+
+  </div>
+
+
+  {% if expenses %}
+
+  <div class="table-wrap">
+
+    <table>
+
+      <thead>
+
+        <tr>
+          <th>Expense</th>
+          <th>Paid by</th>
+          <th>Amount</th>
+          <th>Source</th>
+        </tr>
+
+      </thead>
+
+
+      <tbody>
+
+        {% for e in expenses %}
+
+        <tr>
+
+          <td>
+            <strong>{{ e.description }}</strong>
+          </td>
+
+          <td>
+            {{ member_map.get(e.paid_by_member_id, "?") }}
+          </td>
+
+          <td>
+            <strong>
+              ₹{{ "%.2f"|format(e.amount) }}
+            </strong>
+          </td>
+
+          <td>
+
+            <span class="tag">
+
+              {% if e.source == "receipt_ai" %}
+                ✦ AI receipt
+              {% else %}
+                Manual
+              {% endif %}
+
+            </span>
+
+          </td>
+
+        </tr>
+
+        {% endfor %}
+
+      </tbody>
+
+    </table>
+
+  </div>
+
+
+  {% else %}
+
+    <div class="empty-inline">
+      No expenses yet. Add the first one above.
+    </div>
+
+  {% endif %}
+
+</section>
+
+
+<section
+  class="panel settlement-panel"
+  id="settlement-panel"
+>
+
+  <div class="settlement-head">
+
+    <div>
+
+      <div class="kicker">THE AI DECISION</div>
+
+      <h2>Optimized settlement</h2>
+
+      <p>
+        SplitSettle collapses the ledger into the fewest practical transfers.
+      </p>
+
+    </div>
+
+
+    <form
+      method="post"
+      action="/groups/{{ group.id }}/compute-settlement"
+    >
+
+      <button class="secondary">
+        ↻ Recompute
+      </button>
+
+    </form>
+
+  </div>
+
+
+  {% if settlements %}
+
+  <div class="settlements">
+
+
+    {% for s in settlements %}
+
+    <div
+      class="settlement"
+      id="settlement-{{ s.id }}"
+    >
+
+      <div class="people">
+
+        <span class="avatar small">
+          {{ member_map.get(s.from_member_id,"?")[:1]|upper }}
+        </span>
+
+        <strong>
+          {{ member_map.get(s.from_member_id,"?") }}
+        </strong>
+
+        <span class="arrow">
+          →
+        </span>
+
+        <span class="avatar small">
+          {{ member_map.get(s.to_member_id,"?")[:1]|upper }}
+        </span>
+
+        <strong>
+          {{ member_map.get(s.to_member_id,"?") }}
+        </strong>
+
+      </div>
+
+
+      <strong class="amount">
+
+        {% if s.recovery_status == "committed"
+              and s.promised_amount is not none %}
+
+          {% if s.recovery_option == "split_payment" %}
+            ₹{{ "%.2f"|format(s.payment_link_amount or settlement_remaining(s)) }}
+            current installment
+          {% elif s.recovery_option == "scheduled_payment" %}
+            ₹{{ "%.2f"|format(s.promised_amount) }}
+            scheduled
+          {% else %}
+            ₹{{ "%.2f"|format(s.promised_amount) }}
+            committed
+          {% endif %}
+
+        {% else %}
+
+          ₹{{ "%.2f"|format(s.amount) }}
+
+        {% endif %}
+
+      </strong>
+
+
+      <span class="status status-{{ s.status }}">
+        {{ s.status|replace("_"," ") }}
+      </span>
+
+
+      <div class="transfer-actions">
+
+        {% if s.status != "paid" %}
+
+
+          {% if s.payment_link_url %}
+
+            <a
+              href="{{ s.payment_link_url }}"
+              target="_blank"
+              rel="noopener"
+            >
+              Open link ↗
+            </a>
+
+          {% endif %}
+
+
+          {% if s.reminder_count < 3 %}
+
+            <form
+              method="post"
+              action="/settlements/{{ s.id }}/remind"
+            >
+
+              <button class="action">
+                Remind {{ s.reminder_count }}/3
+              </button>
+
+            </form>
+
+          {% endif %}
+
+
+          {% if not s.payment_link_url %}
+
+            <form
+              method="post"
+              action="/settlements/{{ s.id }}/create-payment-link"
+            >
+
+              <button class="action payment">
+                Create payment link
+              </button>
+
+            </form>
+
+          {% else %}
+
+            <form
+              method="post"
+              action="/settlements/{{ s.id }}/sync-payment-status"
+            >
+
+              <button class="action payment">
+                Check status
+              </button>
+
+            </form>
+
+          {% endif %}
+
+
+          <form
+            method="post"
+            action="/settlements/{{ s.id }}/mark-paid"
+          >
+
+            <button class="action">
+              Mark paid
+            </button>
+
+          </form>
+
+
+        {% else %}
+
+          <span class="paid">
+            ✓ Settled
+          </span>
+
+        {% endif %}
+
+      </div>
+
+    </div>
+
+    {% endfor %}
+
+  </div>
+
+
+  <div class="recovery-callout">
+
+    <div class="recovery-icon">
+      ✦
+    </div>
+
+
+    <div>
+
+      {% if recovery_ready > 0 %}
+        <strong>Recovery decision ready</strong>
+        <p>
+          {{ recovery_ready }} transfer(s) have reached the 3-reminder limit.
+          Choose a bounded recovery plan next.
+        </p>
+      {% else %}
+        <strong>Recovery agent active</strong>
+        <p>
+          {{ unpaid }} outstanding transfer(s) are being handled with bounded reminders and payment links.
+        </p>
+      {% endif %}
+
+    </div>
+
+
+    <button
+      class="primary"
+      type="button"
+      onclick="openRecoveryDrawer()"
+    >
+      {% if recovery_ready > 0 %}
+        Prioritize recovery
+      {% else %}
+        Review recovery
+      {% endif %}
+    </button>
+
+  </div>
+
+
+  <div class="integration">
+
+    <i></i>
+
+    {% if razorpay_live %}
+
+      <strong>
+        Razorpay Test Mode connected
+      </strong>
+
+      · Payment links use the Razorpay API.
+
+    {% else %}
+
+      <strong>
+        Demo / Mock Mode
+      </strong>
+
+      · Add Razorpay test credentials for API payment links.
+
+    {% endif %}
+
+  </div>
+
+
+  {% else %}
+
+    <div class="empty-inline">
+
+      <strong>
+        No settlement computed yet.
+      </strong>
+
+      Add expenses, then click Recompute.
+
+    </div>
+
+  {% endif %}
+
+</section>
+
+
+<section class="panel">
+
+  <div class="panel-head">
+
+    <div>
+
+      <div class="kicker">
+        TRACEABILITY
+      </div>
+
+      <h2>
+        Audit trail
+      </h2>
+
+      <p>
+        Every bounded action is logged.
+      </p>
+
+    </div>
+
+
+    <span class="count">
+      {{ audit|length }} logged
+    </span>
+
+  </div>
+
+
+  <div class="audit">
+
+    {% for a in audit %}
+
+      <div>
+
+        <time>
+          {{ a.created_at.strftime("%H:%M:%S") }}
+        </time>
+
+        <b>
+          {{ a.action|replace("_"," ") }}
+        </b>
+
+        <span>
+          {{ a.detail }}
+        </span>
+
+      </div>
+
+    {% else %}
+
+      <div class="empty-inline">
+        No actions have been recorded yet.
+      </div>
+
+    {% endfor %}
+
+  </div>
+
+</section>
+
+
+
+<!-- =========================================================
+     RECOVERY DRAWER
+     ========================================================= -->
+
+<div
+  id="recovery-drawer"
+  class="drawer"
+  onclick="closeRecoveryFromBackdrop(event)"
+>
+
+  <div
+    class="drawer-card recovery-drawer-card"
+    onclick="event.stopPropagation()"
+  >
+
+    <button
+      class="modal-close"
+      type="button"
+      onclick="closeRecoveryDrawer()"
+      aria-label="Close"
+    >
+      ×
+    </button>
+
+
+    <!-- MAIN RECOVERY SCREEN -->
+
+    <div id="recovery-home">
+
+      <div class="kicker">
+        RECOVERY AGENT
+      </div>
+
+      <h2>
+        Prioritize recovery
+      </h2>
+
+      <p>
+        The agent follows a bounded sequence:
+        payment link → reminder → escalation,
+        with a maximum of 3 reminders per settlement.
+      </p>
+
+
+      <div class="steps">
+
+        <div>
+          <b>01</b>
+          <span>Identify unpaid transfers</span>
+        </div>
+
+        <div>
+          <b>02</b>
+          <span>Prefer a direct payment link</span>
+        </div>
+
+        <div>
+          <b>03</b>
+          <span>Escalate reminders within the cap</span>
+        </div>
+
+        <div>
+          <b>04</b>
+          <span>Log every action</span>
+        </div>
+
+      </div>
+
+
+      <button
+        class="primary wide"
+        type="button"
+        onclick="showOutstandingPayments()"
+      >
+        Review outstanding payments
+      </button>
+
+    </div>
+
+
+
+    <!-- OUTSTANDING PAYMENT SCREEN -->
+
+    <div
+      id="recovery-outstanding"
+      hidden
+    >
+
+      <div class="kicker">
+        RECOVERY AGENT
+      </div>
+
+
+      <h2>
+        Recover outstanding payments
+      </h2>
+
+
+      <p class="recovery-subtitle">
+        Instead of endlessly reminding someone,
+        SplitSettle lets them choose how they want
+        to close the balance.
+      </p>
+
+
+      <div class="recovery-list">
+
+
+        {% for s in settlements %}
+
+          {% if s.status != "paid" %}
+
+          <div
+            class="recovery-item"
+            data-settlement-id="{{ s.id }}"
+            data-route="{{ member_map.get(s.from_member_id,"?")|e }} → {{ member_map.get(s.to_member_id,"?")|e }}"
+            data-amount="{{ "%.2f"|format(s.amount) }}"
+            data-remaining="{{ "%.2f"|format(s.amount - (s.paid_amount or 0)) }}"
+          >
+
+            <div class="recovery-item-top">
+
+              <strong>
+
+                {{ member_map.get(s.from_member_id,"?") }}
+
+                <span class="arrow">
+                  →
+                </span>
+
+                {{ member_map.get(s.to_member_id,"?") }}
+
+              </strong>
+
+
+              <span class="recovery-amount">
+
+                {% if s.recovery_status == "committed"
+                      and s.promised_amount is not none %}
+                  ₹{{ "%.2f"|format(s.payment_link_amount or (s.amount - (s.paid_amount or 0))) }}
+                  {% if s.recovery_option == "split_payment" %}
+                    current installment
+                  {% elif s.recovery_option == "scheduled_payment" %}
+                    scheduled payment
+                  {% else %}
+                    current payment
+                  {% endif %}
+                {% else %}
+                  ₹{{ "%.2f"|format(s.amount - (s.paid_amount or 0)) }}
+                  outstanding
+                {% endif %}
+
+              </span>
+
+            </div>
+
+
+            <div class="recovery-status-row">
+
+              <span class="status status-{{ s.status }}">
+
+                {{ s.status|replace("_"," ") }}
+
+              </span>
+
+
+              {% if s.reminder_count >= 3 %}
+
+                <span class="recovery-ready">
+                  READY FOR RECOVERY
+                </span>
+
+              {% else %}
+
+                <span class="recovery-progress">
+                  {{ s.reminder_count }}/3 reminders
+                </span>
+
+              {% endif %}
+
+            </div>
+
+
+            {% if s.recovery_status == "committed"
+                  and s.promised_amount is not none %}
+
+              <div class="recovery-commitment">
+
+                <strong>
+                  {% if s.recovery_option == "split_payment" %}
+                    Split payment committed
+                  {% elif s.recovery_option == "scheduled_payment" %}
+                    Scheduled payment committed
+                  {% else %}
+                    Full payment committed
+                  {% endif %}
+                </strong>
+
+                <span>
+                  First commitment: ₹{{ "%.2f"|format(s.promised_amount) }}
+                  {% if s.promised_date %} · {{ s.promised_date }}{% endif %}
+                </span>
+
+                {% if s.recovery_option == "split_payment" and s.recovery_note %}
+                  <span>{{ s.recovery_note }}</span>
+                {% endif %}
+
+                <span>
+                  Original balance: ₹{{ "%.2f"|format(s.amount) }}
+                  · Recovered so far: ₹{{ "%.2f"|format(s.paid_amount or 0) }}
+                </span>
+
+                <span>
+                  Current payment link: ₹{{ "%.2f"|format(
+                    s.payment_link_amount or (s.amount - (s.paid_amount or 0))
+                  ) }}
+                </span>
+
+                <span>
+                  {% if s.recovery_option == "split_payment" %}
+                    Outstanding after current installment: ₹{{ "%.2f"|format(
+                      [0, (s.amount - (s.paid_amount or 0)) - (s.payment_link_amount or (s.amount - (s.paid_amount or 0)))]|max
+                    ) }}
+                  {% else %}
+                    Outstanding after scheduled payment: ₹{{ "%.2f"|format(
+                      [0, (s.amount - (s.paid_amount or 0)) - s.promised_amount]|max
+                    ) }}
+                  {% endif %}
+                </span>
+
+              </div>
+
+            {% endif %}
+
+
+            <div class="recovery-item-actions">
+
+              {% if s.reminder_count >= 3 %}
+
+                <button
+                  type="button"
+                  class="action payment"
+                  data-settlement-id="{{ s.id }}" onclick="showRecoveryDecision(this.dataset.settlementId)"
+                >
+                  Choose recovery plan →
+                </button>
+
+              {% else %}
+
+                <button
+                  type="button"
+                  class="action"
+                  data-settlement-id="{{ s.id }}" onclick="goToSettlement(this.dataset.settlementId)"
+                >
+                  View settlement
+                </button>
+
+              {% endif %}
+
+
+              {% if s.payment_link_url %}
+
+                <a
+                  href="{{ s.payment_link_url }}"
+                  target="_blank"
+                  rel="noopener"
+                  class="action payment"
+                >
+                  Open payment link ↗
+                </a>
+
+              {% endif %}
+
+            </div>
+
+          </div>
+
+          {% endif %}
+
+        {% endfor %}
+
+
+        {% if unpaid == 0 %}
+
+          <div class="recovery-empty">
+
+            <div class="recovery-empty-icon">
+              ✓
+            </div>
+
+            <strong>
+              No outstanding payments
+            </strong>
+
+            <p>
+              All settlements in this group are paid.
+            </p>
+
+          </div>
+
+        {% endif %}
+
+      </div>
+
+
+      <button
+        class="secondary wide"
+        type="button"
+        onclick="showRecoveryHome()"
+      >
+        ← Back to recovery agent
+      </button>
+
+    </div>
+
+
+    <!-- RECOVERY DECISION SCREEN -->
+
+    <div
+      id="recovery-decision"
+      hidden
+    >
+
+      <div class="kicker">RECOVERY DECISION</div>
+
+      <h2>Choose how to close the balance</h2>
+
+      <p class="recovery-subtitle">
+        Reminder limit reached. The next step is a bounded recovery commitment.
+      </p>
+
+      <div class="recovery-balance-card">
+        <div>
+          <span>Outstanding transfer</span>
+          <strong id="decision-route"></strong>
+        </div>
+        <strong class="recovery-balance" id="decision-amount">₹0.00</strong>
+      </div>
+
+      <form
+        method="post"
+        id="recovery-decision-form"
+        class="recovery-decision-form"
+      >
+
+        <div class="recovery-options">
+
+          <label class="recovery-option-card">
+            <input
+              type="radio"
+              name="recovery_option"
+              value="full_payment"
+              checked
+              onchange="updateRecoveryOption()"
+            >
+            <span>
+              <strong>Pay full amount</strong>
+              <small>Close the entire outstanding balance now.</small>
+            </span>
+            <b id="full-option-amount">₹0.00</b>
+          </label>
+
+          <label class="recovery-option-card">
+            <input
+              type="radio"
+              name="recovery_option"
+              value="split_payment"
+              onchange="updateRecoveryOption()"
+            >
+            <span>
+              <strong>Split payment</strong>
+              <small>Break the balance into two scheduled installments.</small>
+            </span>
+          </label>
+
+          <div id="split-payment-fields" class="recovery-fields" hidden>
+
+            <div class="installment-head">
+              <strong>Installment 1</strong>
+              <span>Part of the outstanding balance</span>
+            </div>
+
+            <div class="two-col">
+              <label>
+                Amount
+                <input
+                  id="split-amount-1"
+                  name="split_amount_1"
+                  type="number"
+                  step="0.01"
+                  min="0.01"
+                  oninput="validateSplitPlan()"
+                >
+              </label>
+              <label>
+                Date
+                <input
+                  id="split-date-1"
+                  name="split_date_1"
+                  type="date"
+                >
+              </label>
+            </div>
+
+            <div class="installment-head second">
+              <strong>Installment 2</strong>
+              <span>The remaining balance</span>
+            </div>
+
+            <div class="two-col">
+              <label>
+                Amount
+                <input
+                  id="split-amount-2"
+                  name="split_amount_2"
+                  type="number"
+                  step="0.01"
+                  min="0.01"
+                  oninput="validateSplitPlan()"
+                >
+              </label>
+              <label>
+                Date
+                <input
+                  id="split-date-2"
+                  name="split_date_2"
+                  type="date"
+                >
+              </label>
+            </div>
+
+            <div id="split-total-message" class="split-total-message"></div>
+
+          </div>
+
+          <label class="recovery-option-card">
+            <input
+              type="radio"
+              name="recovery_option"
+              value="scheduled_payment"
+              onchange="updateRecoveryOption()"
+            >
+            <span>
+              <strong>Schedule one payment</strong>
+              <small>Choose the amount and date for a single commitment.</small>
+            </span>
+          </label>
+
+          <div id="scheduled-payment-fields" class="recovery-fields" hidden>
+            <div class="two-col">
+              <label>
+                Amount
+                <input
+                  id="scheduled-amount"
+                  name="promised_amount"
+                  type="number"
+                  step="0.01"
+                  min="0.01"
+                >
+              </label>
+              <label>
+                Date
+                <input
+                  id="scheduled-date"
+                  name="promised_date"
+                  type="date"
+                >
+              </label>
+            </div>
+          </div>
+
+        </div>
+
+        <label class="recovery-note-label">
+          Note (optional)
+          <textarea
+            name="recovery_note"
+            rows="3"
+            placeholder="e.g. I'll pay the second installment after salary day."
+          ></textarea>
+        </label>
+
+        <button
+          id="confirm-recovery-button"
+          class="primary wide"
+          type="submit"
+        >
+          Confirm recovery plan
+        </button>
+
+      </form>
+
+      <button
+        class="secondary wide"
+        type="button"
+        onclick="showOutstandingPayments()"
+      >
+        ← Back to outstanding payments
+      </button>
+
+    </div>
+
+  </div>
+
+</div>
+
+
+
+<script>
+
+let selectedReceiptItem = null;
+
+
+/* =========================================================
+   BASIC UI
+   ========================================================= */
+
+function toggleSplits(){
+
+  const a = [
+    ...document.querySelectorAll(
+      'input[name="split_between"]'
+    )
+  ];
+
+  const all = a.every(x => x.checked);
+
+  a.forEach(x => {
+    x.checked = !all;
+  });
+
+}
+
+
+/* =========================================================
+   RECOVERY DRAWER
+   ========================================================= */
+
+function openRecoveryDrawer(){
+
+  const drawer =
+    document.getElementById("recovery-drawer");
+
+  if(!drawer){
+    return;
+  }
+
+  showRecoveryHome();
+
+  drawer.classList.add("open");
+
+  document.body.classList.add("recovery-open");
+
+}
+
+
+function closeRecoveryDrawer(){
+
+  const drawer =
+    document.getElementById("recovery-drawer");
+
+  if(!drawer){
+    return;
+  }
+
+  drawer.classList.remove("open");
+
+  document.body.classList.remove("recovery-open");
+
+}
+
+
+function closeRecoveryFromBackdrop(event){
+
+  if(event.target.id === "recovery-drawer"){
+    closeRecoveryDrawer();
+  }
+
+}
+
+
+function showRecoveryHome(){
+
+  const home = document.getElementById("recovery-home");
+  const outstanding = document.getElementById("recovery-outstanding");
+  const decision = document.getElementById("recovery-decision");
+
+  if(home) home.hidden = false;
+  if(outstanding) outstanding.hidden = true;
+  if(decision) decision.hidden = true;
+
+}
+
+
+function showOutstandingPayments(){
+
+  const home = document.getElementById("recovery-home");
+  const outstanding = document.getElementById("recovery-outstanding");
+  const decision = document.getElementById("recovery-decision");
+
+  if(home) home.hidden = true;
+  if(outstanding) outstanding.hidden = false;
+  if(decision) decision.hidden = true;
+
+}
+
+
+function showRecoveryDecision(id){
+
+  const item = document.querySelector(
+    '.recovery-item[data-settlement-id="' + id + '"]'
+  );
+
+  const decision = document.getElementById("recovery-decision");
+  const home = document.getElementById("recovery-home");
+  const outstanding = document.getElementById("recovery-outstanding");
+
+  if(!item || !decision){
+    return;
+  }
+
+  const route = item.dataset.route || "Settlement";
+  const amount = Number(item.dataset.remaining || item.dataset.amount || 0);
+
+  document.getElementById("decision-route").textContent = route;
+  document.getElementById("decision-amount").textContent = `₹${amount.toFixed(2)}`;
+  document.getElementById("full-option-amount").textContent = `₹${amount.toFixed(2)}`;
+
+  const form = document.getElementById("recovery-decision-form");
+  form.action = `/settlements/${id}/recovery`;
+
+  const half = Math.round((amount / 2) * 100) / 100;
+  document.getElementById("split-amount-1").value = half.toFixed(2);
+  document.getElementById("split-amount-2").value = (amount - half).toFixed(2);
+  document.getElementById("scheduled-amount").value = amount.toFixed(2);
+
+  const today = new Date();
+  const tomorrow = new Date(today);
+  tomorrow.setDate(today.getDate() + 1);
+  const dayAfter = new Date(today);
+  dayAfter.setDate(today.getDate() + 2);
+
+  const iso = d => {
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, "0");
+    const day = String(d.getDate()).padStart(2, "0");
+    return `${y}-${m}-${day}`;
+  };
+
+  document.getElementById("split-date-1").value = iso(tomorrow);
+  document.getElementById("split-date-2").value = iso(dayAfter);
+  document.getElementById("scheduled-date").value = iso(tomorrow);
+
+  document.getElementById("split-date-1").min = iso(today);
+  document.getElementById("split-date-2").min = iso(today);
+  document.getElementById("scheduled-date").min = iso(today);
+
+  document.querySelectorAll('input[name="recovery_option"]').forEach(x => {
+    x.checked = x.value === "full_payment";
+  });
+
+  if(home) home.hidden = true;
+  if(outstanding) outstanding.hidden = true;
+  decision.hidden = false;
+
+  updateRecoveryOption();
+  decision.scrollIntoView({behavior: "smooth", block: "start"});
+
+}
+
+
+function updateRecoveryOption(){
+
+  const selected = document.querySelector(
+    'input[name="recovery_option"]:checked'
+  );
+
+  const splitFields = document.getElementById("split-payment-fields");
+  const scheduledFields = document.getElementById("scheduled-payment-fields");
+  const splitInputs = splitFields.querySelectorAll("input");
+  const scheduledInputs = scheduledFields.querySelectorAll("input");
+
+  const isSplit = selected && selected.value === "split_payment";
+  const isScheduled = selected && selected.value === "scheduled_payment";
+
+  splitFields.hidden = !isSplit;
+  scheduledFields.hidden = !isScheduled;
+
+  splitInputs.forEach(x => x.required = isSplit);
+  scheduledInputs.forEach(x => x.required = isScheduled);
+
+  validateSplitPlan();
+
+}
+
+
+function validateSplitPlan(){
+
+  const selected = document.querySelector(
+    'input[name="recovery_option"]:checked'
+  );
+
+  const message = document.getElementById("split-total-message");
+  const button = document.getElementById("confirm-recovery-button");
+
+  if(!message || !button){
+    return true;
+  }
+
+  if(!selected || selected.value !== "split_payment"){
+    message.textContent = "";
+    button.disabled = false;
+    return true;
+  }
+
+  const a = Number(document.getElementById("split-amount-1").value || 0);
+  const b = Number(document.getElementById("split-amount-2").value || 0);
+  const total = Number(document.getElementById("decision-amount").textContent.replace(/[^0-9.]/g, "")) || 0;
+  const valid = a > 0 && b > 0 && Math.abs((a + b) - total) < 0.011;
+
+  message.textContent = valid
+    ? `✓ Split total matches ₹${total.toFixed(2)}`
+    : `Installments must add up to ₹${total.toFixed(2)}`;
+
+  button.disabled = !valid;
+  return valid;
+}
+
+
+function goToSettlement(id){
+
+  closeRecoveryDrawer();
+
+  setTimeout(() => {
+
+    const element =
+      document.getElementById(
+        "settlement-" + id
+      );
+
+    if(element){
+
+      element.scrollIntoView({
+        behavior: "smooth",
+        block: "center"
+      });
+
+      element.style.transition =
+        "box-shadow 0.3s ease";
+
+      element.style.boxShadow =
+        "0 0 0 3px rgba(72, 99, 220, 0.25)";
+
+      setTimeout(() => {
+
+        element.style.boxShadow = "";
+
+      }, 1800);
+
+    }
+
+  }, 150);
+
+}
+
+
+/* =========================================================
+   RECEIPT AI
+   ========================================================= */
+
+async function parseReceipt(){
+
+  const text =
+    document
+      .getElementById("receipt-text")
+      .value
+      .trim();
+
+  const box =
+    document.getElementById("receipt-result");
+
+  const btn =
+    document.getElementById(
+      "parse-receipt-button"
+    );
+
+
+  if(!text){
+
+    box.innerHTML =
+      '<span class="error">Paste receipt text first.</span>';
+
+    return;
+  }
+
+
+  selectedReceiptItem = null;
+
+  document.getElementById(
+    "receipt-selected"
+  ).hidden = true;
+
+
+  btn.disabled = true;
+
+  btn.textContent = "Parsing…";
+
+  box.innerHTML =
+    "<p>✦ AI is extracting line items…</p>";
+
+
+  try{
+
+    const f = new FormData();
+
+    f.append(
+      "receipt_text",
+      text
+    );
+
+
+    const r = await fetch(
+      location.pathname + "/receipt",
+      {
+        method: "POST",
+        body: f
+      }
+    );
+
+
+    const d = await r.json();
+
+
+    if(!r.ok){
+
+      throw Error(
+        d.detail || "Request failed"
+      );
+
+    }
+
+
+    if(!d.items?.length){
+
+      box.innerHTML =
+        "<p>No line items found.</p>";
+
+      return;
+    }
+
+
+    box.innerHTML =
+      '<div class="receipt-heading">AI extracted items — select one</div>';
+
+
+    const list =
+      document.createElement("div");
+
+    list.className = "ai-items";
+
+
+    d.items.forEach(i => {
+
+      const n = Number(i.amount);
+
+
+      if(
+        !Number.isFinite(n) ||
+        n <= 0
+      ){
+
+        return;
+
+      }
+
+
+      const b =
+        document.createElement("button");
+
+      b.type = "button";
+
+      b.className = "ai-item";
+
+      b.textContent =
+        `${i.description} · ₹${n.toFixed(2)}`;
+
+
+      b.onclick = () =>
+        selectReceiptItem(
+          i.description,
+          n,
+          b
+        );
+
+
+      list.appendChild(b);
+
+    });
+
+
+    box.appendChild(list);
+
+
+  }catch(e){
+
+    console.error(e);
+
+    box.innerHTML =
+      '<span class="error">Could not parse the receipt right now.</span>';
+
+  }finally{
+
+    btn.disabled = false;
+
+    btn.textContent =
+      "Parse with AI";
+
+  }
+
+}
+
+
+function selectReceiptItem(
+  description,
+  amount,
+  el
+){
+
+  selectedReceiptItem = {
+    description,
+    amount
+  };
+
+
+  document
+    .querySelectorAll(".ai-item")
+    .forEach(x =>
+      x.classList.remove("selected")
+    );
+
+
+  el.classList.add("selected");
+
+
+  document.getElementById(
+    "receipt-selected-text"
+  ).textContent =
+    `${description} · ₹${Number(amount).toFixed(2)}`;
+
+
+  document.getElementById(
+    "receipt-selected"
+  ).hidden = false;
+
+
+  document.getElementById(
+    "expense-description"
+  ).value = description;
+
+
+  document.getElementById(
+    "expense-amount"
+  ).value =
+    Number(amount).toFixed(2);
+
+
+  document
+    .getElementById("expense-card")
+    .scrollIntoView({
+      behavior: "smooth",
+      block: "center"
+    });
+
+}
+
+
+async function addAIExpense(){
+
+  if(!selectedReceiptItem){
+
+    showMsg(
+      "Select an AI item first.",
+      true
+    );
+
+    return;
+
+  }
+
+
+  const formEl =
+    document.getElementById(
+      "expense-form"
+    );
+
+
+  const checked = [
+    ...formEl.querySelectorAll(
+      'input[name="split_between"]:checked'
+    )
+  ];
+
+
+  if(!checked.length){
+
+    showMsg(
+      "Select at least one member.",
+      true
+    );
+
+    return;
+
+  }
+
+
+  const f = new FormData();
+
+
+  f.append(
+    "description",
+    document
+      .getElementById("expense-description")
+      .value
+      .trim()
+  );
+
+
+  f.append(
+    "amount",
+    Number(
+      document.getElementById(
+        "expense-amount"
+      ).value
+    ).toFixed(2)
+  );
+
+
+  f.append(
+    "paid_by",
+    document.getElementById(
+      "expense-paid-by"
+    ).value
+  );
+
+
+  checked.forEach(x =>
+    f.append(
+      "split_between",
+      x.value
+    )
+  );
+
+
+  const btn =
+    document.getElementById(
+      "add-ai-expense-button"
+    );
+
+
+  btn.disabled = true;
+
+  btn.textContent = "Adding…";
+
+
+  try{
+
+    const r = await fetch(
+      location.pathname +
+      "/receipt/add-expense",
+      {
+        method: "POST",
+        body: f
+      }
+    );
+
+
+    const d = await r.json();
+
+
+    if(!r.ok || !d.ok){
+
+      throw Error(
+        d.error ||
+        "Could not add expense"
+      );
+
+    }
+
+
+    showMsg(
+      "✓ Added to ledger. Refreshing…",
+      false
+    );
+
+
+    setTimeout(
+      () => location.reload(),
+      500
+    );
+
+
+  }catch(e){
+
+    showMsg(
+      e.message,
+      true
+    );
+
+
+    btn.disabled = false;
+
+    btn.textContent =
+      "Add to ledger";
+
+  }
+
+}
+
+
+function showMsg(
+  message,
+  error
+){
+
+  const x =
+    document.getElementById(
+      "receipt-message"
+    );
+
+
+  x.textContent = message;
+
+  x.className =
+    error
+      ? "error"
+      : "success";
+
+}
+
+</script>
+
+
+
+<!-- =========================================================
+     SMALL UI FIXES FOR RECOVERY DRAWER
+     ========================================================= -->
+
+<style>
+
+.recovery-drawer-card {
+
+  max-height: 90vh;
+  overflow-y: auto;
+  overflow-x: hidden;
+
+  scrollbar-width: thin;
+
+}
+
+
+.recovery-drawer-card::-webkit-scrollbar {
+
+  width: 7px;
+
+}
+
+
+.recovery-drawer-card::-webkit-scrollbar-thumb {
+
+  border-radius: 10px;
+  background: #cbd1dc;
+
+}
+
+
+.recovery-drawer-card::-webkit-scrollbar-track {
+
+  background: transparent;
+
+}
+
+
+.recovery-drawer-card p {
+
+  line-height: 1.6;
+
+}
+
+
+.steps > div {
+
+  display: flex;
+  align-items: center;
+  gap: 18px;
+
+}
+
+
+.steps > div b {
+
+  flex: 0 0 34px;
+
+}
+
+
+.steps > div span {
+
+  flex: 1;
+
+}
+
+
+.recovery-list {
+
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+
+  margin: 24px 0;
+
+}
+
+
+.recovery-item {
+
+  border: 1px solid #e1e5ec;
+  border-radius: 16px;
+
+  padding: 18px;
+
+  background: #fff;
+
+}
+
+
+.recovery-item-top {
+
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+
+  gap: 12px;
+
+  margin-bottom: 12px;
+
+}
+
+
+.recovery-item-top strong {
+
+  font-size: 15px;
+
+}
+
+
+.recovery-amount {
+
+  font-weight: 700;
+  white-space: nowrap;
+
+}
+
+
+.recovery-status-row {
+
+  display: flex;
+  align-items: center;
+  gap: 10px;
+
+  flex-wrap: wrap;
+
+  margin-bottom: 12px;
+
+}
+
+
+.recovery-ready {
+
+  font-size: 11px;
+  font-weight: 800;
+
+  letter-spacing: .05em;
+
+  color: #3158d8;
+
+}
+
+
+.recovery-progress {
+
+  font-size: 13px;
+  color: #747b88;
+
+}
+
+
+.recovery-commitment {
+
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+
+  padding: 12px;
+
+  margin: 10px 0;
+
+  border-radius: 10px;
+
+  background: #f4f7ff;
+
+}
+
+
+.recovery-commitment span {
+
+  font-size: 13px;
+  color: #697386;
+
+}
+
+
+.recovery-item-actions {
+
+  display: flex;
+  gap: 8px;
+
+  flex-wrap: wrap;
+
+  margin-top: 14px;
+
+}
+
+
+.recovery-empty {
+
+  text-align: center;
+
+  padding: 36px 20px;
+
+  border: 1px dashed #d6dbe4;
+
+  border-radius: 16px;
+
+}
+
+
+.recovery-empty-icon {
+
+  width: 42px;
+  height: 42px;
+
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  margin: 0 auto 12px;
+
+  border-radius: 50%;
+
+  background: #edf8ef;
+
+  font-weight: 800;
+
+}
+
+
+.recovery-empty p {
+
+  color: #747b88;
+  margin-bottom: 0;
+
+}
+
+
+.recovery-subtitle {
+
+  color: #747b88;
+
+}
+
+
+/* =========================================================
+   RECOVERY DECISION SCREEN
+   ========================================================= */
+
+.recovery-balance-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 18px;
+  margin: 22px 0;
+  border: 1px solid #dfe4ec;
+  border-radius: 16px;
+  background: #f7f9fc;
+}
+
+.recovery-balance-card div {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.recovery-balance-card span {
+  font-size: 12px;
+  color: #747b88;
+  text-transform: uppercase;
+  letter-spacing: .05em;
+}
+
+.recovery-balance {
+  font-size: 24px;
+  white-space: nowrap;
+}
+
+.recovery-options {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.recovery-option-card {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 12px;
+  padding: 15px;
+  border: 1px solid #dfe4ec;
+  border-radius: 14px;
+  cursor: pointer;
+  background: #fff;
+}
+
+.recovery-option-card:has(input:checked) {
+  border-color: #4863dc;
+  background: #f5f7ff;
+}
+
+.recovery-option-card input {
+  width: 18px;
+  height: 18px;
+}
+
+.recovery-option-card span {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.recovery-option-card small {
+  color: #747b88;
+  line-height: 1.45;
+}
+
+.recovery-fields {
+  padding: 15px;
+  margin-top: -2px;
+  border: 1px solid #e1e5ec;
+  border-top: 0;
+  border-radius: 0 0 14px 14px;
+  background: #fafbfc;
+}
+
+.installment-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.installment-head.second {
+  margin-top: 16px;
+}
+
+.installment-head span {
+  color: #747b88;
+  font-size: 12px;
+}
+
+.split-total-message {
+  margin-top: 10px;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.recovery-note-label {
+  display: block;
+  margin-top: 16px;
+}
+
+.recovery-note-label textarea {
+  width: 100%;
+  box-sizing: border-box;
+  margin-top: 7px;
+  resize: vertical;
+}
+
+#confirm-recovery-button:disabled {
+  opacity: .55;
+  cursor: not-allowed;
+}
+
+@media (max-width: 600px){
+
+  .recovery-item-top {
+
+    align-items: flex-start;
+    flex-direction: column;
+
+  }
+
+  .recovery-drawer-card {
+
+    max-height: 94vh;
+
+  }
+
+}
+
+</style>
+
+<!-- =========================================================
+     PRESERVE SCROLL POSITION AFTER POST/REDIRECT
+     IMPORTANT: this script is INSIDE the Jinja content block.
+     ========================================================= -->
+
+<script>
+(function () {
+  const SCROLL_KEY = "splitsettle-scroll-position";
+
+  function restoreScrollPosition() {
+    const saved = sessionStorage.getItem(SCROLL_KEY);
+
+    if (saved === null) {
+      return;
+    }
+
+    const scrollY = parseInt(saved, 10);
+    sessionStorage.removeItem(SCROLL_KEY);
+
+    if (!Number.isFinite(scrollY)) {
+      return;
+    }
+
+    // Wait until the redirected page has rendered.
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        window.scrollTo({
+          top: scrollY,
+          left: 0,
+          behavior: "auto"
+        });
+
+        // Final correction for browsers that restore the
+        // page position after the first scroll operation.
+        setTimeout(() => {
+          window.scrollTo(0, scrollY);
+        }, 50);
+      });
+    });
+  }
+
+  // Also handles browser back/forward navigation.
+  window.addEventListener("pageshow", restoreScrollPosition);
+
+  // Save the exact position before POST forms reload the page.
+  document.addEventListener("submit", function (event) {
+    const form = event.target;
+
+    if (!form || form.tagName !== "FORM") {
+      return;
+    }
+
+    sessionStorage.setItem(
+      SCROLL_KEY,
+      String(window.scrollY)
+    );
+  });
+})();
+</script>
+
+{% endblock %}

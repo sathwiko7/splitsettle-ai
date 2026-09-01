@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}SplitSettle AI{% endblock %}</title>
+  <meta name="description" content="SplitSettle AI — intelligent group expense settlement and payment recovery.">
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header class="topbar">
+  <div class="topbar-inner">
+    <a class="brand" href="/">
+      <span class="brand-mark">S</span><span>SplitSettle <b>AI</b></span>
+    </a>
+    <nav><a href="/">Dashboard</a></nav>
+    <div class="live-status"><i></i> AI settlement live</div>
+  </div>
+</header>
+<main class="page-shell">{% block content %}{% endblock %}</main>
+<footer class="footer">SplitSettle AI · bounded recovery for group expenses</footer>
+</body>
+</html>

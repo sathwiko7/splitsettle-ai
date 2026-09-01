@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% block title %}Dashboard — SplitSettle AI{% endblock %}
+{% block content %}
+<section class="home-hero">
+  <div>
+    <div class="kicker">GROUP EXPENSE MANAGEMENT</div>
+    <h1>Close group expenses.<br><span>Without the chaos.</span></h1>
+    <p>Track shared spending, find the fewest transfers, and recover outstanding payments with a bounded AI workflow.</p>
+  </div>
+  <div class="hero-orb"><div class="orb-card"><span>AI</span><strong>Settlement</strong><small>Optimized</small></div></div>
+</section>
+
+<div class="section-heading">
+  <div><h2>Your groups</h2><p>Open a group to manage expenses and recovery.</p></div>
+  <button class="primary" onclick="document.getElementById('create-modal').showModal()">+ Create group</button>
+</div>
+
+{% if groups %}
+<div class="group-grid">
+{% for group in groups %}
+<a class="group-card" href="/groups/{{ group.id }}">
+  <div class="group-icon">{{ group.name[:1]|upper }}</div>
+  <div><strong>{{ group.name }}</strong><small>Open group workspace</small></div>
+  <b class="arrow">→</b>
+</a>
+{% endfor %}
+</div>
+{% else %}
+<div class="empty-panel"><div class="empty-icon">+</div><h3>No groups yet</h3><p>Create your first group and start splitting expenses.</p><button class="primary" onclick="document.getElementById('create-modal').showModal()">Create group</button></div>
+{% endif %}
+
+<dialog id="create-modal" class="modal">
+<form method="post" action="/groups">
+<button type="button" class="modal-close" onclick="this.closest('dialog').close()">×</button>
+<div class="kicker">NEW WORKSPACE</div><h2>Create a group</h2><p>Trips, roommates, dinners, projects — anything shared.</p>
+<label>Group name<input name="name" placeholder="e.g. Goa Trip 2026" required autofocus></label>
+<button class="primary wide" type="submit">Create group →</button>
+</form>
+</dialog>
+{% endblock %}
